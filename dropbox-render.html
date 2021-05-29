@@ -1,0 +1,56 @@
+<html>
+<body>
+<input id="picker" type="file"/>
+<input id="scale" type="number" min="1" max="10" value="2.45"/>
+<button onclick="load()">load</button>
+<div id="output"/>
+<script type="text/javascript">
+let dec = new TextDecoder();
+let fntMap = {
+	'Calibri': 'Calibri',
+	'TimesNewRomanPSMT': 'Times New Roman',
+	'TimesNewRomanPS-BoldMT': 'Times New Roman',
+	'Verdana-Bold': 'Verdana',
+	'Verdana': 'Verdana',
+	'Verdana-Italic': 'Verdana',
+	'Arial-BoldMT': 'Arial',
+	'Calibri-Bold': 'Calibri',
+	'Arial-ItalicMT': 'Arial',
+	'ArialMT': 'Arial',
+	'Arial-BoldItalicMT': 'Arial',
+};
+let fnt = [];
+
+window.onerror = alert;
+
+function load() {
+
+output.innerHTML = "";
+let reader = new FileReader();
+reader.onload = e => render(JSON.parse(e.target.result));
+reader.readAsText(picker.files[0]);
+}
+
+function render(D) {
+
+D.text.fonts.forEach(f => fnt.push(fntMap[f.n]));
+
+let dim = D.metadata.dimensions[0];
+let s = scale.value;
+let w = dim[0]*s, h = dim[1]*s;
+for (let p = 0; p < D.metadata.page_count; p++) {
+	let e = document.createElement('canvas');
+	e.width = w;
+	e.height = h;
+	let c = e.getContext('2d');
+	c.strokeRect(0, 0, w, h);
+	D.text.pages[p].forEach(t => {
+		c.font = `${t.h*s}px ${fnt[t.f]}`;
+		c.fillText(t.t, t.r[0]*s, h-t.r[1]*s);
+	});
+	output.appendChild(e);
+}
+}
+</script>
+</body>
+</html>

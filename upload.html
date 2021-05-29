@@ -1,0 +1,99 @@
+<html>
+<head>
+<script>
+function raw(file, xhr) {
+	xhr.send(file);
+}
+
+function binaryStr(file, xhr) {
+	reader = new FileReader();
+	content = null;
+	reader.onload = function (e) {
+		content = e.target.result;
+		//xhr.setRequestHeader("Content-Type", "multipart/related; boundary=" + boundary);
+		xhr.send(content);
+	};
+	reader.readAsArrayBuffer(file);
+}
+
+function multipart(file, xhr) {
+	payload = null;
+	reader = new FileReader();
+	reader.onload = function (e) {
+		content = e.target.result;
+		boundary = "BOUNDARY";
+		meta = '{"name": ' + file.name + '}';
+		console.log(content.substring(0, 10));
+		console.log(content.length);
+		payload = ["--" + boundary, "Content-Type: application/json", "", meta, "", "--" + boundary, "Content-Type: " + file.type, "", content, "--" + boundary + "--"].join("\r\n");
+		console.log(payload.length);
+		xhr.setRequestHeader("Content-Type", "multipart/related; charset=UTF-8,boundary=" + boundary);
+		xhr.overrideMimeType("application/x-www-form-urlencoded");
+		xhr.send(payload);
+	};
+	reader.readAsBinaryString(file);
+}
+
+function formdata(file, xhr) {
+	payload = null;
+	reader = new FileReader();
+	reader.onload = function (e) {
+		var content = new Blob([file]);
+		var meta = {name: file.name, mimeType: file.type};
+		var payload = new FormData();
+		payload.append('metadata', new Blob([JSON.stringify(meta)], {type: 'application/json'}));
+		payload.append('file', content);
+		xhr.setRequestHeader("Authorization", "Basic booba");
+//		xhr.setRequestHeader("Content-Type", "multipart/related; charset=UTF-8,boundary=" + boundary);
+//		xhr.overrideMimeType("application/x-www-form-urlencoded");
+		xhr.send(payload);
+	};
+	reader.readAsArrayBuffer(file);
+}
+
+function up(sender) {
+	file = picker.files[0];
+	xhr = new XMLHttpRequest();
+	xhr.open("POST", "/", false);
+	sender(file, xhr);
+}
+
+function upp() {
+	xx = undefined;
+	file = picker.files[0];
+	if (!file) {
+		alert("Please select a file for uploading");
+	}
+	var reader = new FileReader();
+	reader.onload = function (e) {
+		content = e.target.result;
+		x = new XMLHttpRequest();
+		x.open("POST", "/", false);
+
+/*
+		boundary = "B";
+		meta='{"name":"desktop_orig.ini"}';
+		file={type:"application/octet-stream"};
+		console.log(content.substring(0, 10));
+		console.log(content.length);
+		pau = ["--" + boundary, "Content-Type: application/json", "", meta, "", "--" + boundary, "Content-Type: " + file.type, "", content, "--" + boundary + "--"].join("\r\n");
+		console.log(pau.length);
+		x.setRequestHeader("Content-Type", "multipart/related; boundary=" + boundary);
+*/
+		pau = content;
+
+		//x.setRequestHeader("Content-Transfer-Encoding", "base64");
+		x.send(pau);
+	};
+	reader.readAsBinaryString(file);
+}
+</script>
+</head>
+<body>
+<input type="file" id="picker"/>
+<button onclick="up(raw)">raw</button>
+<button onclick="up(binaryStr)">binaryStr</button>
+<button onclick="up(multipart)">multipart</button>
+<button onclick="up(formdata)">formdata</button>
+</body>
+</html>

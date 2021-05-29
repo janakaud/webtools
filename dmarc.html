@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>DMARC</title>
+<script src="https://rawgit.com/imaya/zlib.js/master/bin/gunzip.min.js" type="text/javascript"></script>
+<script src="https://rawgit.com/imaya/zlib.js/master/bin/unzip.min.js" type="text/javascript"></script>
+</head>
+<body>
+<input id="picker" type="file" multiple/>
+<button onclick="load()">load</button>
+<div id="output"/>
+</body>
+<script type="text/javascript">
+const XML = "text/xml";
+let files = [];
+let dec = new TextDecoder();
+let dom = new DOMParser();
+
+function load() {
+    if (typeof Zlib === "undefined") {
+        alert("Zlib not loaded, please reload");
+        return;
+    }
+
+	output.innerHTML = "";
+	files = [];
+
+	let done = 0;
+	for (let i = 0; i < picker.files.length; i++) {
+		let file = picker.files[i];
+		let reader = new FileReader();
+		reader.onload = function (e) {
+			add(e.target.result, e.target._name, e.target._type);
+			++done == picker.files.length && process();
+		};
+		reader._name = file.name;
+		reader._type = file.type;
+		reader.readAsArrayBuffer(file);
+	}
+}
+
+function add(buf, name, type) {
+	if (name.endsWith(".zip") || type.indexOf("/zip") > 0) {
+		let un = new Zlib.Unzip(new Uint8Array(buf));
+		un.getFilenames().forEach(n => add(un.decompress(n), n, XML));
+
+	} else if (name.endsWith(".gz") || type.indexOf("gzip") > 0) {
+		let gun = new Zlib.Gunzip(new Uint8Array(buf));
+		add(gun.decompress(), gun.getMembers()[0].name || name.replace(/\.gz$/, ""), XML);
+
+	} else if (name.endsWith(".xml") || type.indexOf("/xml") > 0) {
+
+		let parts = name.split("!");
+		let start = parseInt(parts[2]) * 1000;
+		let end = parseInt(parts[3]) * 1000;
+		if (end > start + 86404000) {
+			console.warn(`Time gap too large: ${new Date(start)}-${new Date(end)}`);
+		}
+
+		files.push({
+			name,
+			domain: parts[0],
+			origin: parts[1],
+			time: new Date(start),
+			doc: dom.parseFromString(dec.decode(buf), XML)
+		});
+
+	} else {
+		return alert(`Unknown file ${name}, type ${type}`);
+	}
+}
+
+function process() {
+	files.sort((f1, f2) => f1.time - f2.time);
+
+	let tables = {};
+	files.forEach(f => {
+		let path = `${f.origin} \u2192 ${f.domain}`;
+		let t = tables[path] || (tables[path] = {});
+		f.doc.querySelectorAll("feedback record").forEach(r => {
+			let p = r.querySelector("row policy_evaluated");
+			let fail = p.querySelector("disposition").innerHTML !== "none"
+				|| p.querySelector("dkim").innerHTML !== "pass"
+				|| p.querySelector("spf").innerHTML !== "pass";
+			if (fail) {
+				let d = new Date(f.time).toISOString().substring(5, 10);
+				let ent = t[d] || (t[d] = {file: f.name, count: 0, label: []});
+				ent.count++;
+				ent.label.push(r.innerHTML);
+			}
+		});
+	});
+	render(tables);
+}
+
+function render(tables) {
+	output.innerHTML = Object.entries(tables).filter(([path, t]) => Object.keys(t).length > 0).map(([path, t]) => {
+		let h = [], r = [];
+		let prevM;
+		Object.entries(t).forEach(([d, ent]) => {
+			let dParts = d.split("-");
+			h.push(`<th title="${ent.file}" onclick="copy(this)">${prevM === dParts[0] ? dParts[1] : dParts.join("<br/>")}</th>`);
+			let l = ent.label.join('\n');
+			r.push(`<td title="${l}" onclick="copy(this)">${ent.count}</td>`);
+			prevM = dParts[0];
+		});
+		return `<br/>
+<h5>${path}</h5>
+<table border="1" cellspacing="0">
+<tbody>
+<tr>${h.join("")}</tr>
+<tr>${r.join("")}</tr>
+</tbody>
+</table>
+`;
+	}).join("\n");
+}
+
+function copy(node) {
+	if (!confirm(`[copy?]
+
+${node.title}`)) return;
+	let s = window.getSelection();
+	let r = document.createRange();
+
+	let e = document.createElement("pre");
+	e.innerHTML = node.title.replace(/</g, "&lt;");
+	e.style["font-size"] = "0";	// invisible
+	document.body.appendChild(e);
+	r.selectNode(e);
+	s.removeAllRanges();
+	s.addRange(r);
+	document.execCommand("copy");
+
+	document.body.removeChild(e);
+}
+</script>
+</html>

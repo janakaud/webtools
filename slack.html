@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Slack</title>
+</head>
+<body onload="load()">
+<button onclick="add()">add</button>
+<button onclick="reset()">reset</button>
+<button onclick="_showPg(JSON.parse(prompt('data') || '{}'))">show-pg</button>
+<div id="ctrl"></div>
+<textarea id="multiline" rows="10" cols="60" placeholder="multi-line message input"></textarea>
+<div id="output"></div>
+</body>
+<script type="text/javascript">
+let slack;
+const TYPE = {"U": "users", "C": "channels", "D": "conversations", "G": "conversations"};
+const OFFSET = -new Date().getTimezoneOffset() * 60000;
+
+function load() {
+	slack = JSON.parse(localStorage["slack"] || "{}");
+	ctrl.innerHTML = "";
+	Object.keys(slack).forEach(_render);
+}
+
+function save() {
+	localStorage["slack"] = JSON.stringify(slack);
+}
+
+function add() {
+	let ws = prompt("Workspace name:");
+	let token = ws && prompt("Workspace token:");
+	if (!token) return;
+
+	slack[ws] = {token, ids:{}, ts: {}};
+	save();
+	load();
+}
+
+function reset() {
+	if (!confirm("This will clear all cached channel/workspace info. Are you sure?")) return;
+	localStorage.removeItem("slack");
+	load();
+}
+
+
+function tailChannel(ws) {
+	let ch = _readId(ws);
+	if (!ch) return;
+
+	let data;
+	let url = _channelUrl("conversations.history", ws, ch);
+
+	let lastTS = (confirm("Resume from last?") && (slack[ws].ts || {})[ch]) || _readTS("Start from (s):");
+	if (!lastTS) return;
+
+	do {
+		_visit(`${url}&oldest=${lastTS}`);
+		data = JSON.parse(prompt("Paste content from next tab") || "{}");
+		if (!data.ok) {
+			alert("Not OK");
+			break;
+		}
+		_showPg(data);
+
+		let firstAtt = data.messages[0].attachments;
+		lastTS = (firstAtt ? firstAtt[0].ts : parseInt(data.messages[0].ts)) + 1;
+
+	} while (data.has_more);
+
+	if (confirm("Mark as read?")) markRead(ws, ch, lastTS);
+}
+
+function _showPg(data) {
+	let msgs = data.messages.map(m => {
+		let att = m.attachments;
+		return att && att[0] && att[0].ts ? `${_dt(att[0].ts)}\n${att[0].fallback}` : `${_dt(parseInt(m.ts))}\n${m.text}`;
+	}).reverse();
+
+	let msg = "";
+	for (let i = 0; i < msgs.length; i++) {
+		if (msgs[i].length + msg.length >= 10000) {
+			alert(msg);
+			msg = "";
+		}
+		msg += msgs[i] + "\n\n";
+	}
+	alert(msg);
+}
+
+function _channelUrl(action, ws, ch) {
+	return `https://api.slack.com/api/${action}?token=${slack[ws].token}&channel=${ch}`
+}
+
+function _visit(url) {
+	console.log(url);
+	window.open(url, "_newtab");
+}
+
+
+function checkUnreads(ws) {
+/*FIXME need to send cookie via CORS req
+	let xhr = new XMLHttpRequest();
+	xhr.open("GET", `https://api.slack.com/api/client.counts?token=${slack[ws].token}`, true);
+	xhr.withCredentials = true;
+	xhr.onload = function() {
+		if (this.status < 200 || this.status > 299) return alert(this.responseText);
+		_show(JSON.parse(this.responseText), ws);
+	};
+	xhr.send(null);
+	tgt.src = `https://api.slack.com/api/client.counts?token=${slack[ws].token}`;
+*/
+	_visit(`https://api.slack.com/api/client.counts?token=${slack[ws].token}`);
+	_checkUnreads(JSON.parse(prompt("Paste content from next tab") || "{}"), ws);
+}
+
+function _checkUnreads(data, ws) {
+	if (!data.ok) return alert("Not OK");
+
+	let ids = slack[ws].ids;
+	let out = [];
+	let unknown = [];
+
+	if (data.threads.has_unreads)
+		out.push(`Threads with ${data.threads.mention_count} mentions`);
+
+	_processGroup(data.ims, out, "Direct", ids, unknown);
+	_processGroup(data.channels, out, "Channels", ids, unknown);
+	_processGroup(data.mpims, out, "MPIM", ids, unknown);
+
+	alert(out.join("\n"));
+
+	if (unknown.length > 0) {
+		unknown.forEach(id => ids[id] = prompt(`Name of ${id}:`) || undefined);
+		save();
+	}
+}
+
+function _processGroup(g, out, label, ids, unknown) {
+	if (g.length < 1) return;
+	out.push(`\n${label}\n`);
+	if (!g.reduce((res, c) => _process(c, out, ids, unknown) || res, false)) out.pop();
+}
+
+function _process(c, out, ids, unknown) {
+	let sec = parseFloat(c.latest);
+	if (!c.has_unreads || sec < 1600000000) return false;
+	let id = ids[c.id];
+	if (!id) unknown.push(c.id);
+	out.push(`${id ? `${id} (${c.id})` : c.id}: ${_dt(sec)}`);
+	return true;
+}
+
+
+function checkChannel(ws) {
+	let ch = _readId(ws);
+	if (!ch) return;
+
+	_visit(_channelUrl(`${TYPE[ch.charAt(0)]}.info`, ws, ch));
+}
+
+function markRead(ws, ch = _readId(ws), lastTS = Date.now()/1000) {
+	if (!ch) return;
+
+	slack[ws].ts[ch] = lastTS;
+	save();
+
+	_visit(`${_channelUrl("conversations.mark", ws, ch)}&ts=${lastTS}.`);
+}
+
+function react(ws) {
+	_doReact(ws, 'reactions.add');
+}
+
+function rmReact(ws) {
+	_doReact(ws, 'reactions.remove');
+}
+
+function _doReact(ws, act) {
+	if (!(ch = _readId(ws))) return;
+	if (!(ts = _readTS('Message Timestamp', null))) return;
+	if (!(emo = prompt('Emoji', 'thumbsup'))) return;
+
+	_visit(`${_channelUrl(act, ws, ch)}&timestamp=${ts}&name=${emo}`);
+}
+
+function send(ws) {
+	let ch = _readId(ws);
+	if (!ch) return;
+	let msg = prompt("Message:");
+	if (!msg) return;
+
+	_visit(`${_channelUrl("chat.postMessage", ws, ch)}&text=${encodeURIComponent(msg)}`);
+}
+
+function sendMultiline(ws) {
+	let msg = multiline.value;
+	if (!msg) return alert("Missing text");
+	let ch = _readId(ws);
+	if (!ch) return;
+
+	_visit(`${_channelUrl("chat.postMessage", ws, ch)}&text=${encodeURIComponent(msg)}`);
+	multiline.value = "";
+}
+
+
+function showIds(ws) {
+	alert(Object.entries(slack[ws].ids).map(([k, v]) => `${k}: ${v}`).join("\n"));
+}
+
+function showUsers(ws) {
+	alert(Object.entries(slack[ws].users).map(([k, v]) => `${k}: ${v}`).join("\n"));
+}
+
+function _readId(ws) {
+	let ch = prompt("Channel ID:", slack[ws].lastCheck);
+	if (!ch) return;
+	return slack[ws].lastCheck = ch;
+}
+
+function _readTS(msg, ts = parseInt(Date.now()/1000) - 300) {
+	ts = prompt(msg, ts);
+	//TODO handle string inputs
+	return ts;
+}
+
+function _dt(sec) {
+	return new Date(sec * 1000 + OFFSET).toISOString().substring(11, 19);
+}
+
+function _render(ws) {
+	ctrl.innerHTML += `<br/>
+${ws}
+<button onclick="checkUnreads('${ws}')">all-unreads</button>
+<button onclick="showIds('${ws}')">ids</button>
+<button onclick="showUsers('${ws}')">users</button>
+<button onclick="checkChannel('${ws}')">check-channel</button>
+<button onclick="tailChannel('${ws}')">channel-unreads</button>
+<button onclick="markRead('${ws}')">mark-read</button>
+<button onclick="react('${ws}')">react</button>
+<button onclick="rmReact('${ws}')">remove</button>
+<button onclick="sendMultiline('${ws}')">send-multiline</button>
+<button onclick="send('${ws}')">send</button>
+`;
+}
+</script>
+</html>

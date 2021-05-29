@@ -1,0 +1,66 @@
+<html>
+<body>
+<div id="hover;first;10,20,10,10;40,30,10,10;70,10,30,90" class="ulist">
+<ul>
+<li>
+<p>Click on "a".</p>
+</li>
+<li>
+<p>Click on "b".</p>
+</li>
+<li>
+<p>Click on "c".</p>
+</li>
+</ul>
+</div>
+<div id="first" class="imageblock" style="text-align: center">
+<div class="content">
+<img src="test.png" width="40%"/>
+</div>
+</div>
+	<script type="text/javascript">
+		var links = document.querySelectorAll("*[id^=hover]");
+		foreach(links, function(link) {
+			var parts = link.id.split(";");
+console.log(parts);
+			var imgWrapper = document.getElementById(parts[1]).children[0];
+			imgWrapper.setAttribute("style", "position: relative");
+			var img = imgWrapper.children[0];
+			img.setAttribute("style", "position: absolute");
+			var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute("id", parts[1] + "-overlay");
+			svg.setAttribute("style", "position: absolute");
+			svg.setAttribute("width", img.width);
+			svg.setAttribute("height", img.height);
+			imgWrapper.appendChild(svg);
+			foreach(link.children[0].children, function(item, i) {
+console.log(item);
+				item.onmouseenter = function () {
+					drawRect(svg, parts[i + 2].split(","));
+				}
+			});
+		});
+
+		function drawRect(svg, dim) {
+			if (svg.firstChild) {
+				svg.removeChild(svg.firstChild);
+			}
+			var rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+			rect.setAttribute("x", dim[0]*svg.getAttribute("width")/100);
+			rect.setAttribute("y", dim[1]*svg.getAttribute("height")/100);
+			rect.setAttribute("width", dim[2]*svg.getAttribute("width")/100);
+			rect.setAttribute("height", dim[3]*svg.getAttribute("height")/100);
+			rect.setAttribute("fill", "#eeeeee");
+			rect.setAttribute("fill-opacity", "0.8");
+			svg.appendChild(rect);
+			return rect;
+		}
+		
+		function foreach(list, fn) {
+			for (var i = 0; i < list.length; i++) {
+				fn(list[i], i);
+			}
+		}
+	</script>
+</body>
+</html>
