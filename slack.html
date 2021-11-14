@@ -17,6 +17,24 @@ let slack;
 const TYPE = {"U": "users", "C": "channels", "D": "conversations", "G": "conversations"};
 const OFFSET = -new Date().getTimezoneOffset() * 60000;
 
+let recentList = {};
+
+function recent(ws, ch) {
+	let lst = recentList[ws];
+	if (!lst) {
+		lst = recentList[ws] = [];
+	}
+	let exist = lst.indexOf(ch);
+	if (exist >= 0) {
+		lst.splice(exist, 1);
+	};
+	while (lst.length > 7) {
+		lst.pop();
+	}
+	lst.splice(0, 0, ch);
+	document.getElementById(`recent_${ws}`).innerHTML = lst.map(ch => `| <a onclick="tailChannel('${ws}', '${ch}', true)">${slack[ws].ids[ch]}</a>`).join(" ");
+}
+
 function load() {
 	slack = JSON.parse(localStorage["slack"] || "{}");
 	ctrl.innerHTML = "";
@@ -44,18 +62,23 @@ function reset() {
 }
 
 
-function tailChannel(ws) {
-	let ch = _readId(ws);
+function tailChannel(ws, ch, resume) {
+	if (!ch) {
+		ch = _readId(ws);
+	}
 	if (!ch) return;
 
 	let data;
 	let url = _channelUrl("conversations.history", ws, ch);
 
-	let lastTS = (confirm("Resume from last?") && (slack[ws].ts || {})[ch]) || _readTS("Start from (s):");
+	let lastTS = ((resume || confirm("Resume from last?")) && (slack[ws].ts || {})[ch]) || _readTS("Start from (s):");
 	if (!lastTS) return;
+
+	recent(ws, ch);
 
 	do {
 		_visit(`${url}&oldest=${lastTS}`);
+		lastTS = now();
 		data = JSON.parse(prompt("Paste content from next tab") || "{}");
 		if (!data.ok) {
 			alert("Not OK");
@@ -159,13 +182,22 @@ function checkChannel(ws) {
 	_visit(_channelUrl(`${TYPE[ch.charAt(0)]}.info`, ws, ch));
 }
 
-function markRead(ws, ch = _readId(ws), lastTS = Date.now()/1000) {
+function markRead(ws, ch = _readId(ws), lastTS = now()) {
 	if (!ch) return;
 
 	slack[ws].ts[ch] = lastTS;
 	save();
 
 	_visit(`${_channelUrl("conversations.mark", ws, ch)}&ts=${lastTS}.`);
+}
+
+function markThread(ws, ch = _readId(ws), lastTS = now()) {
+	if (!ch) return;
+
+	let threadTS = _readTS('thread_ts');
+	if (!threadTS) return;
+
+	_visit(`${_channelUrl("subscriptions.thread.mark", ws, ch)}&thread_ts=${threadTS}.&ts=${lastTS}.`);
 }
 
 function react(ws) {
@@ -184,23 +216,32 @@ function _doReact(ws, act) {
 	_visit(`${_channelUrl(act, ws, ch)}&timestamp=${ts}&name=${emo}`);
 }
 
-function send(ws) {
-	let ch = _readId(ws);
-	if (!ch) return;
-	let msg = prompt("Message:");
-	if (!msg) return;
+function del(ws) {
+	if (!(ch = _readId(ws))) return;
+	if (!(ts = _readTS('Message Timestamp', null))) return;
 
-	_visit(`${_channelUrl("chat.postMessage", ws, ch)}&text=${encodeURIComponent(msg)}`);
+	_visit(`${_channelUrl('chat.delete', ws, ch)}&ts=${ts}`);
+}
+
+function send(ws) {
+	_send(ws, null);
 }
 
 function sendMultiline(ws) {
-	let msg = multiline.value;
-	if (!msg) return alert("Missing text");
+	if (!multiline.value) return alert("Missing text");
+	if (_send(ws, multiline.value)) {
+		multiline.value = "";
+	}
+}
+
+function _send(ws, msg) {
 	let ch = _readId(ws);
 	if (!ch) return;
+	if (!msg) msg = prompt("Message:");
+	if (!msg) return;
 
 	_visit(`${_channelUrl("chat.postMessage", ws, ch)}&text=${encodeURIComponent(msg)}`);
-	multiline.value = "";
+	return slack[ws].ts[ch] = now() + 10;
 }
 
 
@@ -212,13 +253,19 @@ function showUsers(ws) {
 	alert(Object.entries(slack[ws].users).map(([k, v]) => `${k}: ${v}`).join("\n"));
 }
 
+function search(ws) {
+	let q = prompt("Query:");
+	if (!q) return;
+	_visit(`https://api.slack.com/api/search.messages?token=${slack[ws].token}&query=${q}`);
+}
+
 function _readId(ws) {
 	let ch = prompt("Channel ID:", slack[ws].lastCheck);
 	if (!ch) return;
 	return slack[ws].lastCheck = ch;
 }
 
-function _readTS(msg, ts = parseInt(Date.now()/1000) - 300) {
+function _readTS(msg, ts = parseInt(now()) - 300) {
 	ts = prompt(msg, ts);
 	//TODO handle string inputs
 	return ts;
@@ -228,19 +275,27 @@ function _dt(sec) {
 	return new Date(sec * 1000 + OFFSET).toISOString().substring(11, 19);
 }
 
+function now() {
+	return Date.now() / 1000;
+}
+
 function _render(ws) {
 	ctrl.innerHTML += `<br/>
 ${ws}
 <button onclick="checkUnreads('${ws}')">all-unreads</button>
 <button onclick="showIds('${ws}')">ids</button>
 <button onclick="showUsers('${ws}')">users</button>
+<button onclick="search('${ws}')">search</button>
 <button onclick="checkChannel('${ws}')">check-channel</button>
 <button onclick="tailChannel('${ws}')">channel-unreads</button>
 <button onclick="markRead('${ws}')">mark-read</button>
+<button onclick="markThread('${ws}')">mark-thread</button>
 <button onclick="react('${ws}')">react</button>
-<button onclick="rmReact('${ws}')">remove</button>
+<button onclick="rmReact('${ws}')">unreact</button>
+<button onclick="del('${ws}')">delete</button>
 <button onclick="sendMultiline('${ws}')">send-multiline</button>
 <button onclick="send('${ws}')">send</button>
+<span id="recent_${ws}"></span>
 `;
 }
 </script>
